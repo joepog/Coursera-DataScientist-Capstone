@@ -1,0 +1,165 @@
+---
+title: 'Coursera Data Scientist Capstone : Milestone Report'
+author: "Joe Pogson"
+date: "4/27/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This project will focus on developing a predictive model for text utlising natural language processing and a large body of text based data.
+
+This report acts as a description for the major features to date for developing a predictive model based on exploratory data analysis. 
+
+## Getting the data
+
+First we should set up the environmenr
+
+```{r Environment set up}
+## Load Packages
+library(downloader)
+library(plyr)
+library(dplyr)
+library(knitr)
+library(tm)
+library(stringi)
+library(ggplot2)
+library(RWeka)
+```
+
+Next we need to check if the data has been laoded to the local drive and if not download and unzip it.
+
+```{r Data loading and extracting}
+## Download Data if not already performed.
+if(!file.exists("./Data")){
+        dir.create("./Data")
+}
+Url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+if(!file.exists("./Data/Coursera-SwiftKey.zip")){
+        download.file(Url,destfile="./Data/Coursera-SwiftKey.zip",mode = "wb")
+}
+## Unzip Data (if not already)
+        if(!file.exists("./coursera-swiftkey/coursera-swiftkey.zip")){
+        unzip(zipfile="./Data/Coursera-SwiftKey.zip",exdir="./Data")
+        }
+```
+
+Now we have the data downloaded and extracted we can start looking at it.
+We can see that data consists of several large text files in serveral languages(We will focus on the en_US files as english is my native language). There are different sources of data from News, Blogs and Twitter.
+
+```{r data connections}
+path<-file.path("./Data/final","en_US")
+files<-list.files(path,recursive=TRUE)
+# File connection for twitter data
+con <- file("./Data/final/en_US/en_US.twitter.txt","r") 
+lineTwitter<-readLines(con,skipNul = TRUE)
+close(con)
+# File connection for blog data
+con <- file("./Data/final/en_US/en_US.blogs.txt","r") 
+lineBlogs<-readLines(con, skipNul = TRUE)
+close(con)
+# File connection for news data
+con <- file("./Data/final/en_US/en_US.news.txt","r") 
+lineNews<-readLines(con, skipNul = TRUE)
+close(con)
+```
+
+Now lets start looking at the size of the 3 data sets.
+
+```{r Size calculations}
+lineBlogs.size <- file.info("./Data/final/en_US/en_US.blogs.txt")$size / 1024 ^ 2
+lineNews.size <- file.info("./Data/final/en_US/en_US.news.txt")$size / 1024 ^ 2
+lineTwitter.size <- file.info("./Data/final/en_US/en_US.twitter.txt")$size / 1024 ^ 2
+# Get words in files
+lineBlogs.words <- stri_count_words(lineBlogs)
+lineNews.words <- stri_count_words(lineNews)
+lineTwitter.words <- stri_count_words(lineTwitter)
+# Summary of the data sets
+data.frame(source = c("blogs","news","twitter"),
+           file.size.MB = c(lineBlogs.size, lineNews.size, lineTwitter.size),
+           num.lines = c(length(lineBlogs), length(lineNews), length(lineTwitter)),
+           num.words = c(sum(lineBlogs.words), sum(lineNews.words), sum(lineTwitter.words)),
+           mean.num.words = c(mean(lineBlogs.words), mean(lineNews.words), mean(lineTwitter.words)))
+
+```
+
+## Data Cleaning
+
+Ok we now know the size of the data we have but before we can progress into the exploratory stage we need to clean the data.
+
+```{r Data Cleaning}
+# Get a sample of the data
+set.seed(5000)
+data.sample<-c(sample(lineBlogs,length(lineBlogs)*0.02),
+               sample(lineNews,length(lineNews)*0.02),
+               sample(lineTwitter,length(lineTwitter)*0.02))
+# Create corpus and clean data
+corpus<-VCorpus(VectorSource(data.sample))
+toSpace<-content_transformer(function(x,pattern)gsub(pattern," ", x))
+corpus<-tm_map(corpus,toSpace,"(f|ht)tp(s?)://(.*)[.][a-z]+")
+corpus<-tm_map(corpus,toSpace,"@[^\\s]+")
+corpus<-tm_map(corpus,tolower)
+corpus<-tm_map(corpus,removeWords,stopwords("en"))
+corpus<-tm_map(corpus,removePunctuation)
+corpus<-tm_map(corpus,removeNumbers)
+corpus<-tm_map(corpus,stripWhitespace)
+corpus<-tm_map(corpus,PlainTextDocument)
+```
+
+## Exploratory Analysis
+
+The data are now arranged and cleaned in a better format. 
+Now it is time to start some basic analyses.
+
+In order to get a better idea of how to predict the text it would be good to get an idea of the most popular ngrams.
+
+```{r calculate frequencies}
+options(mc.cores=1)
+getFreq <- function(tdm) {
+  freq <- sort(rowSums(as.matrix(tdm)),decreasing=TRUE)
+  return(data.frame(word=names(freq),freq=freq))
+}
+bigram <- function(x) NGramTokenizer(x, Weka_control(min = 2, max = 2))
+trigram <- function(x) NGramTokenizer(x, Weka_control(min = 3, max = 3))
+makePlot <- function(data, label) {
+  ggplot(data[1:30,], aes(reorder(word,-freq),freq))+
+         labs(x=label,y="Frequency")+
+         theme(axis.text.x=element_text(angle=60,size=12,hjust=1)) +
+         geom_bar(stat="identity",fill=I("black"))
+}
+# Frequencies of n-grams
+unigrams <- getFreq(removeSparseTerms(TermDocumentMatrix(corpus), 0.9999))
+bigrams <- getFreq(removeSparseTerms(TermDocumentMatrix(corpus, control = list(tokenize = bigram)), 0.9999))
+trigrams <- getFreq(removeSparseTerms(TermDocumentMatrix(corpus, control = list(tokenize = trigram)), 0.9999))
+```
+
+Histogram of the most common uni-grams.
+
+```{r Unigram}
+makePlot(unigrams, "Top 30 Uni-grams")
+```
+
+
+Histogram of the most common bi-grams.
+
+```{r bigram}
+makePlot(bigrams, "Top 30 Bi-grams")
+```
+
+Histogram of the most common tri-grams.
+
+```{r trigram}
+makePlot(trigrams, "Top 30 Common Tri-grams")
+```
+
+## Conclusion
+
+Here we can see the distribution of the most common ngrams that will be used for developing a predictive model.
+
+A potential model could use several levels of model starting at a tri-gram prediction and then stepping down to bi-gram if no suitable tri-gram is identified
+
+A text input box will be used in the Shiny app where a short phrase will be put through the algorithm and a suggested next word will be dispalyed.
